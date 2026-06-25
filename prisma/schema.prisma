@@ -1,0 +1,599 @@
+// This is your Prisma schema file
+// Designed to work with existing Supabase database structure
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// NEXTAUTH MODELS (text IDs)
+// ============================================
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String?   @unique
+  emailVerified DateTime?
+  image         String?
+  password      String?
+  role          Role      @default(student)
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  // Auth relations
+  accounts Account[]
+  sessions Session[]
+
+  @@map("users")
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String  @map("user_id")
+  type              String
+  provider          String
+  providerAccountId String  @map("provider_account_id")
+  refresh_token     String? @map("refresh_token") @db.Text
+  access_token      String? @map("access_token") @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@map("accounts")
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique @map("session_token")
+  userId       String   @map("user_id")
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+  @@map("verification_tokens")
+}
+
+enum Role {
+  student
+  instructor
+  admin
+}
+
+// ============================================
+// SUPABASE AUTH PROFILES (links to auth.users)
+// ============================================
+
+model Profile {
+  id          String    @id @default(uuid()) @db.Uuid
+  name        String
+  email       String    @unique
+  role        String    @default("student")
+  avatarUrl   String?   @map("avatar_url")
+  bio         String?
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  // Relations - Profile is linked to User by email, not FK
+  courses      Course[]       @relation("InstructorCourses")
+  enrollments  Enrollment[]
+  reviews      Review[]
+
+  @@map("profiles")
+}
+
+// ============================================
+// CATEGORY MODEL
+// ============================================
+
+model Category {
+  id          String    @id @default(uuid()) @db.Uuid
+  name        String    @unique
+  slug        String    @unique
+  description String?
+  icon        String?
+  color       String?
+  order       Int       @default(0)
+  isActive    Boolean   @default(true) @map("is_active")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  courses Course[]
+
+  @@map("categories")
+}
+
+// ============================================
+// COURSE MODEL
+// ============================================
+
+model Course {
+  id             String    @id @default(uuid()) @db.Uuid
+  title          String
+  slug           String    @unique
+  description   String?
+  thumbnailUrl   String?   @map("image_url")
+  trailerUrl     String?
+  instructorId   String?   @map("instructor_id") @db.Uuid
+  categoryId     String?   @map("category_id") @db.Uuid
+  category       String?
+  level          String
+  language       String    @default("English")
+  price          Decimal   @default(0) @map("price")
+  discountPrice  Decimal?  @map("discount_price")
+  currency       String    @default("USD")
+  durationHours  Int       @default(0) @map("duration_hours")
+  totalLectures  Int       @default(0) @map("total_lectures")
+  totalStudents  Int       @default(0) @map("student_count")
+  rating         Decimal   @default(0)
+  totalReviews   Int       @default(0) @map("total_reviews")
+  isPublished    Boolean   @default(false) @map("is_published")
+  isFeatured     Boolean   @default(false) @map("is_featured")
+  isFree         Boolean   @default(false) @map("is_free")
+  publishedAt    DateTime? @map("published_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  // Relations
+  instructor  Profile?   @relation("InstructorCourses", fields: [instructorId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  categoryRel Category?   @relation(fields: [categoryId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  sections    Section[]
+  lectures    Lecture[]
+  enrollments Enrollment[]
+  reviews     Review[]
+  quizzes     Quiz[]
+  certificates Certificate[]
+  outcomes    LearningOutcome[]
+
+  @@map("courses")
+}
+
+// ============================================
+// SECTION MODEL
+// ============================================
+
+model Section {
+  id          String   @id @default(uuid()) @db.Uuid
+  courseId    String   @map("course_id") @db.Uuid
+  title       String
+  description String?
+  order       Int      @default(0)
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  course   Course    @relation(fields: [courseId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  lectures Lecture[]
+
+  @@map("sections")
+}
+
+// ============================================
+// LECTURE MODEL (mapped to 'lessons' table)
+// ============================================
+
+model Lecture {
+  id            String      @id @default(uuid()) @db.Uuid
+  courseId      String      @map("course_id") @db.Uuid
+  sectionId     String?     @map("section_id") @db.Uuid
+  title         String
+  slug          String?
+  description   String?
+  videoUrl      String?     @map("video_url")
+  videoDuration Int         @default(0) @map("duration_minutes")
+  audioUrl      String?     @map("audio_url")
+  attachments   String[]    @default([])
+  transcript    String?     @db.Text
+  isPreview     Boolean     @default(false) @map("is_preview")
+  isPublished   Boolean     @default(true)
+  order         Int         @default(0) @map("order_index")
+  lectureType   String      @default("video") @map("lecture_type")
+  content       String?     @db.Text
+  createdAt     DateTime    @default(now()) @map("created_at")
+  updatedAt     DateTime    @updatedAt @map("updated_at")
+
+  course   Course    @relation(fields: [courseId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  section  Section?  @relation(fields: [sectionId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  comments Comment[]
+  progress LectureProgress[]
+
+  @@map("lessons")
+}
+
+// ============================================
+// ENROLLMENT MODEL
+// ============================================
+
+model Enrollment {
+  id               String    @id @default(uuid()) @db.Uuid
+  studentId        String    @map("student_id") @db.Uuid
+  courseId         String    @map("course_id") @db.Uuid
+  progress         Decimal   @default(0)
+  completedLectures Int      @default(0) @map("completed_lectures")
+  totalWatchTime   Int       @default(0) @map("total_watch_time")
+  lastAccessedAt   DateTime? @map("last_accessed_at")
+  enrolledAt       DateTime  @default(now()) @map("enrolled_at")
+  completedAt      DateTime? @map("completed_at")
+  certificateIssued Boolean  @default(false) @map("certificate_issued")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  student      Profile       @relation(fields: [studentId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  course       Course        @relation(fields: [courseId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  certificate  Certificate?
+  lectureProgress LectureProgress[]
+
+  @@unique([studentId, courseId])
+  @@map("enrollments")
+}
+
+// ============================================
+// REVIEW MODEL
+// ============================================
+
+model Review {
+  id           String   @id @default(uuid()) @db.Uuid
+  courseId     String   @map("course_id") @db.Uuid
+  studentId    String   @map("student_id") @db.Uuid
+  rating       Int
+  comment      String?
+  isVerified   Boolean  @default(false) @map("is_verified")
+  isPublished  Boolean  @default(true) @map("is_published")
+  helpfulCount Int      @default(0) @map("helpful_count")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  course  Course  @relation(fields: [courseId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  student Profile @relation(fields: [studentId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@unique([courseId, studentId])
+  @@map("reviews")
+}
+
+// ============================================
+// COMMENT MODEL
+// ============================================
+
+model Comment {
+  id            String   @id @default(uuid()) @db.Uuid
+  lectureId     String   @map("lecture_id") @db.Uuid
+  userId        String   @map("user_id") @db.Uuid
+  parentId      String?  @map("parent_id") @db.Uuid
+  content       String   @db.Text
+  isEdited      Boolean  @default(false) @map("is_edited")
+  isHighlighted Boolean  @default(false) @map("is_highlighted")
+  isResolved    Boolean  @default(false) @map("is_resolved")
+  helpfulCount  Int      @default(0) @map("helpful_count")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  lecture Lecture   @relation(fields: [lectureId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  parent  Comment?  @relation("CommentReplies", fields: [parentId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  children Comment[] @relation("CommentReplies")
+
+  @@map("comments")
+}
+
+// ============================================
+// QUIZ MODEL
+// ============================================
+
+model Quiz {
+  id               String   @id @default(uuid()) @db.Uuid
+  courseId         String   @map("course_id") @db.Uuid
+  title            String
+  description      String?
+  instructions     String?
+  timeLimit        Int?     @map("time_limit")
+  passingScore     Int      @default(70) @map("passing_score")
+  maxAttempts      Int      @default(3) @map("max_attempts")
+  shuffleQuestions Boolean  @default(true) @map("shuffle_questions")
+  showResults      Boolean  @default(true) @map("show_results")
+  isActive         Boolean  @default(true) @map("is_active")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  course    Course       @relation(fields: [courseId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  questions Question[]
+  results   QuizResult[]
+
+  @@map("quizzes")
+}
+
+// ============================================
+// QUESTION MODEL
+// ============================================
+
+model Question {
+  id            String   @id @default(uuid()) @db.Uuid
+  quizId        String   @map("quiz_id") @db.Uuid
+  question      String   @db.Text
+  questionType  String   @map("question_type")
+  options       String[] @default([])
+  correctAnswer String   @map("correct_answer")
+  explanation   String?  @db.Text
+  points        Int      @default(1)
+  order         Int      @default(0)
+  imageUrl      String?  @map("image_url")
+  codeSnippet   String?  @map("code_snippet") @db.Text
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  quiz Quiz @relation(fields: [quizId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@map("questions")
+}
+
+// ============================================
+// QUIZ RESULT MODEL
+// ============================================
+
+model QuizResult {
+  id             String    @id @default(uuid()) @db.Uuid
+  quizId         String    @map("quiz_id") @db.Uuid
+  userId         String    @map("user_id")
+  score          Decimal
+  correctAnswers Int       @map("correct_answers")
+  totalQuestions Int       @map("total_questions")
+  timeSpent      Int       @default(0) @map("time_spent")
+  isPassed       Boolean   @map("is_passed")
+  attemptNumber  Int       @map("attempt_number")
+  answers        Json?
+  startedAt      DateTime  @default(now()) @map("started_at")
+  completedAt    DateTime? @map("completed_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+
+  quiz Quiz @relation(fields: [quizId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@index([quizId])
+  @@index([userId])
+  @@map("quiz_results")
+}
+
+// ============================================
+// CERTIFICATE MODEL
+// ============================================
+
+model Certificate {
+  id                String    @id @default(uuid()) @db.Uuid
+  userId            String    @map("user_id") @db.Uuid
+  courseId          String    @map("course_id") @db.Uuid
+  enrollmentId      String?   @unique @map("enrollment_id") @db.Uuid
+  certificateNumber String    @unique @map("certificate_number")
+  issueDate         DateTime  @default(now()) @map("issue_date")
+  expiryDate        DateTime? @map("expiry_date")
+  isValid           Boolean   @default(true) @map("is_valid")
+  verifiedAt        DateTime? @map("verified_at")
+  metadata          Json?
+  createdAt         DateTime  @default(now()) @map("created_at")
+
+  course     Course      @relation(fields: [courseId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  enrollment Enrollment? @relation(fields: [enrollmentId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+
+  @@map("certificates")
+}
+
+// ============================================
+// FEEDBACK MODEL
+// ============================================
+
+model Feedback {
+  id           String    @id @default(uuid()) @db.Uuid
+  fromUserId   String    @map("from_user_id")
+  toUserId     String    @map("to_user_id")
+  courseId     String?   @map("course_id") @db.Uuid
+  rating       Int?
+  feedbackType String   @map("feedback_type")
+  subject      String
+  message      String    @db.Text
+  isRead       Boolean   @default(false) @map("is_read")
+  isResolved   Boolean   @default(false) @map("is_resolved")
+  resolvedAt   DateTime? @map("resolved_at")
+  resolvedBy   String?   @map("resolved_by")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  @@map("feedback")
+}
+
+// ============================================
+// CONTACT MESSAGE MODEL
+// ============================================
+
+model ContactMessage {
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String
+  email     String
+  subject   String
+  message   String
+  status    String   @default("pending")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("contact_messages")
+}
+
+// ============================================
+// LEARNING OUTCOME MODEL
+// ============================================
+
+model LearningOutcome {
+  id        String   @id @default(uuid()) @db.Uuid
+  courseId  String   @map("course_id") @db.Uuid
+  content   String
+  order     Int      @default(0)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  course Course @relation(fields: [courseId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@map("learning_outcomes")
+}
+
+// ============================================
+// LECTURE PROGRESS MODEL
+// ============================================
+
+model LectureProgress {
+  id           String    @id @default(uuid()) @db.Uuid
+  lectureId    String    @map("lecture_id") @db.Uuid
+  enrollmentId String    @map("enrollment_id") @db.Uuid
+  isCompleted  Boolean   @default(false) @map("is_completed")
+  watchTime    Int       @default(0) @map("watch_time")
+  lastPosition Int       @default(0) @map("last_position")
+  completedAt  DateTime? @map("completed_at")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  lecture     Lecture    @relation(fields: [lectureId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  enrollment  Enrollment @relation(fields: [enrollmentId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@unique([lectureId, enrollmentId])
+  @@map("lecture_progress")
+}
+
+// ============================================
+// FORUM CATEGORY MODEL
+// ============================================
+
+model ForumCategory {
+  id          String   @id @default(uuid()) @db.Uuid
+  name        String
+  slug        String   @unique
+  description String?
+  icon        String?
+  color       String?
+  order       Int      @default(0)
+  isActive    Boolean  @default(true) @map("is_active")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  posts Post[]
+
+  @@map("forum_categories")
+}
+
+// ============================================
+// FORUM POST MODEL
+// ============================================
+
+model Post {
+  id           String    @id @default(uuid()) @db.Uuid
+  categoryId   String    @map("category_id") @db.Uuid
+  authorId     String    @map("author_id") @db.Uuid
+  title        String
+  slug         String    @unique
+  content      String    @db.Text
+  isPinned     Boolean    @default(false) @map("is_pinned")
+  isLocked     Boolean    @default(false) @map("is_locked")
+  viewCount    Int       @default(0) @map("view_count")
+  likeCount    Int       @default(0) @map("like_count")
+  replyCount   Int       @default(0) @map("reply_count")
+  lastReplyAt  DateTime? @map("last_reply_at")
+  lastReplyBy  String?   @map("last_reply_by")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  category ForumCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  replies  PostReply[]
+
+  @@map("posts")
+}
+
+// ============================================
+// POST REPLY MODEL
+// ============================================
+
+model PostReply {
+  id           String   @id @default(uuid()) @db.Uuid
+  postId       String   @map("post_id") @db.Uuid
+  authorId     String   @map("author_id") @db.Uuid
+  parentId     String?  @map("parent_id") @db.Uuid
+  content      String   @db.Text
+  likeCount    Int      @default(0) @map("like_count")
+  isAccepted   Boolean  @default(false) @map("is_accepted")
+  isEdited     Boolean  @default(false) @map("is_edited")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  post    Post       @relation(fields: [postId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  parent  PostReply? @relation("PostReplyReplies", fields: [parentId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  replies PostReply[] @relation("PostReplyReplies")
+
+  @@map("post_replies")
+}
+
+// ============================================
+// USER FEEDBACK MODEL (Platform-wide)
+// ============================================
+
+model UserFeedback {
+  id           String    @id @default(uuid()) @db.Uuid
+  userId       String    @map("user_id")
+  type         String
+  category     String?
+  subject      String
+  message      String    @db.Text
+  rating       Int?
+  status       String    @default("pending")
+  priority     String    @default("normal")
+  isRead       Boolean   @default(false) @map("is_read")
+  resolvedAt   DateTime? @map("resolved_at")
+  resolvedBy   String?   @map("resolved_by")
+  response     String?   @db.Text
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  @@map("user_feedback")
+}
+
+// ============================================
+// TESTIMONIAL MODEL
+// ============================================
+
+model Testimonial {
+  id           String   @id @default(uuid()) @db.Uuid
+  userId       String?  @map("user_id") @db.Uuid
+  name         String
+  role         String
+  content      String   @db.Text
+  avatarUrl    String?  @map("avatar_url")
+  courseId     String?  @map("course_id") @db.Uuid
+  rating       Int      @default(5)
+  isPublished  Boolean  @default(false) @map("is_published")
+  order        Int      @default(0)
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  @@map("testimonials")
+}
+
+// ============================================
+// NEWSLETTER SUBSCRIBER MODEL
+// ============================================
+
+model NewsletterSubscriber {
+  id        String   @id @default(uuid()) @db.Uuid
+  email     String   @unique
+  name      String?
+  isActive  Boolean  @default(true) @map("is_active")
+  source    String?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("newsletter_subscribers")
+}
